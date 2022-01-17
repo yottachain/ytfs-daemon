@@ -7,7 +7,10 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path"
+	"syscall"
+	"time"
 	"yottachain/ytfs-daemon/VM"
 )
 
@@ -29,9 +32,9 @@ func main() {
 		log.Println("日志文件:output.log")
 		log.SetOutput(FileLogger)
 		log.Println("守护进程已启动")
-		for {
-			boot()
-		}
+		//for {
+		boot()
+		//}
 		log.Println("守护进程退出")
 	} else {
 		VM.Run("update.lua", "boot.lua")
@@ -44,19 +47,39 @@ func boot() {
 		log.Println("主脚本退出")
 	}()
 
-	cmd := exec.Command(os.Args[0])
-	cmd.Stdout = log.Writer()
-	cmd.Stderr = log.Writer()
-	cmd.Env = os.Environ()
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
+	var daemonC *exec.Cmd
+	go func() {
+		var yOrN byte
+		<-sigs
+		fmt.Println("Are you sure you want to quit ?（y/n）")
+		fmt.Scanf("%c\n", &yOrN)
+		if yOrN == 'y' {
+			daemonC.Process.Signal(syscall.SIGQUIT)
+			os.Exit(0)
+		}
+	}()
 
-	fl, err := os.OpenFile(".pid", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	for {
+		cmd := exec.Command(os.Args[0])
+		cmd.Stdout = log.Writer()
+		cmd.Stderr = log.Writer()
+		cmd.Env = os.Environ()
 
-	cmd.Start()
-	if err != nil {
-		log.Println(err.Error())
-	} else {
-		fl.WriteString(fmt.Sprintf("%d", cmd.Process.Pid))
-		fl.Close()
+		fl, err := os.OpenFile(".pid", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+
+		cmd.Start()
+		if err != nil {
+			log.Println(err.Error())
+		} else {
+			fl.WriteString(fmt.Sprintf("%d", cmd.Process.Pid))
+			fl.Close()
+		}
+		cmd.Wait()
+
+		time.Sleep(10 * time.Second)
 	}
-	cmd.Wait()
 }
+
+
